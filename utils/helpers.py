@@ -3,7 +3,7 @@ import numpy as np
 import os
 import joblib
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 BASE_DIR = r"C:\Users\elakkiya\json_tutorial\Chennai_Weather_Prediction"
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -28,30 +28,101 @@ def save_model(model, name):
 #LOAD THE MODEL
 def load_model(name):
     return joblib.load(os.path.join(MODELS_DIR, f"{name}.pkl"))
+    
 #EVALUATE THE MODEL WITH RMSE AND R2SCORE
-def evaluate_model(model, x_test, y_test, name=None):
-    pred = model.predict(x_test)
-    rmse = np.sqrt(mean_squared_error(y_test, pred))
-    r2 = r2_score(y_test, pred)
-    if name is not None:
+def evaluate_model(x_test, y_test, name=None):
+    print(f"{name} Model Evaluation starts...")
+    model  = load_model(name)
+    if name =="linear_regression":
+        print(f"predicting with {name}...")
+        pred = model.predict(x_test)
+        print("Calculating Metrics...")
+        rmse = np.sqrt(mean_squared_error(y_test, pred))
+        r2 = r2_score(y_test, pred)
+        print(f"Visualizing {name}...")
         visualize_model(name, y_test, pred)
-    return rmse, r2
+        return rmse, r2
+        
+    elif name in ["lasso_regression" ,"lassoCV"]:
+        print(f"predicting with {name}...")
+        pred = model.predict(x_test)
+        print("Calculating Metrics...")
+        rmse = np.sqrt(mean_squared_error(y_test, pred))
+        r2 = r2_score(y_test, pred)
+        print(f"Visualizing {name}...")
+        #sending model to get the coefficients
+        if hasattr(x_test, "columns"):
+            visualize_model(name, y_test, pred, model = model, 
+                            x_test = x_test, rmse=rmse, r2=r2)
+        else:
+            print("Visualization Not done: Check if feature names are passed with Lasso x_test data set")
+        return rmse, r2
+    else:
+        print("Evaluation is not defined for this model")
+        return None
+        
+
+def set_up_viz(y_test, pred, color="red", title = "Actual vs Predicted", rmse=None, r2=None):
+    plt.figure(figsize=(8,6))
+    plt.scatter(y_test, pred, alpha=0.6, color="red", label = "Predictions")
+    plt.plot([y_test.min(), y_test.max()],
+             [y_test.min(), y_test.max()], color = "blue", 
+             linestyle="--", label = "Fit Line")
+    plt.xlabel("Actual Temperature")
+    plt.ylabel("Predicted Temperature")
+    plt.title(title)
+
+    if rmse is not None and r2 is not None:
+        text = f"RMSE: {rmse:.2f}\nR-squared: {r2:.3f}"
+        plt.text(0.05, 0.95, text, 
+                 transform = plt.gca().transAxes,
+                 fontsize = 11, color="black",
+                 verticalalignment = "top",
+                 bbox = dict(boxstyle="round,pad=0.4", 
+                             facecolor="lightgray",
+                             alpha=0.5))
+    
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
 ##VISUALIZING THE TRAIN TEST SPLIT - TIME SERIES VIZ
-def visualize_model(name,y_test, pred):
-    print("Visualizing data")
+def visualize_model(name,y_test, pred, model=None, x_test=None, rmse=None, r2=None):
+    #LINEAR REGRESSION
     if name=="linear_regression":
-        plt.figure(figsize=(8,6))
-        plt.scatter(y_test, pred, alpha=0.6, color='red', label = "Predictions")
-        plt.plot([y_test.min(), y_test.max()], 
-                 [y_test.min(), y_test.max()], color='blue', linestyle='--',
-                 label = "fit line")
-        plt.xlabel("Actual Max Temp")
-        plt.ylabel("Predicted Max Temp")
-        plt.legend()
-        plt.show()
-        print("visualization done")
+        try:
+            set_up_viz(y_test, pred, title = f"{name}: Actual vs Predicted", 
+                       rmse=rmse, r2=r2)
+            print(f"{name} - Visualization done")
+        except Exception as e:
+            print(f"An error occured during visualization: {e}")
+            
+    #2. LASSO REGRESSION
+    elif name in ["lasso_regression", "lassoCV"]:
+        try:
+            #VIZ 1 on Actual vs Predicted
+            set_up_viz(y_test, pred, title = f"{name}: Actual vs Predicted",
+                      rmse=rmse, r2=r2)
+            print(f"{name} - Visualization - 1 done")
+            #VIZ 2 on Coefficients
+            feature_names = x_test.columns
+            coef_df = pd.DataFrame({"Feature": feature_names, 
+                                    "Coefficient": model.coef_})
+            coef_df = coef_df.sort_values(by="Coefficient", ascending=True)
+            plt.figure(figsize=(8,6))
+            #creating horizontal bar charts
+            plt.barh(coef_df["Feature"], coef_df["Coefficient"], color="green")
+            plt.xlabel("Coefficient Value")
+            plt.ylabel("Feature")
+            plt.title(f"{name} Coefficients")
+            plt.tight_layout()
+            plt.show()
+            print(f"{name} - Visualization -2 done")
+        except Exception as e:
+            print(f"An error occured during visualization: {e}")
     else:
         print("visualization not designed for this model")
+        
 #FORECASTING THE NEXT 3 DAYS TEMPERATURE
 def forecast_next_3_days(model_name,data_df, n_days = 3):
     predictions_list = []
