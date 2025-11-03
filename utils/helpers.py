@@ -43,7 +43,7 @@ def evaluate_model(x_test, y_test, name=None):
         visualize_model(name, y_test, pred)
         return rmse, r2
         
-    elif name in ["lasso_regression" ,"lassoCV"]:
+    elif name in ["lasso_regression" ,"lassoCV", "ridge_regression", "ridgeCV"]:
         print(f"predicting with {name}...")
         pred = model.predict(x_test)
         print("Calculating Metrics...")
@@ -97,8 +97,8 @@ def visualize_model(name,y_test, pred, model=None, x_test=None, rmse=None, r2=No
         except Exception as e:
             print(f"An error occured during visualization: {e}")
             
-    #2. LASSO REGRESSION
-    elif name in ["lasso_regression", "lassoCV"]:
+    #2. LASSO REGRESSION, RIDGE REGRESSION
+    elif name in ["lasso_regression", "lassoCV", "ridge_regression", "ridgeCV"]:
         try:
             #VIZ 1 on Actual vs Predicted
             set_up_viz(y_test, pred, title = f"{name}: Actual vs Predicted",
@@ -108,7 +108,10 @@ def visualize_model(name,y_test, pred, model=None, x_test=None, rmse=None, r2=No
             feature_names = x_test.columns
             coef_df = pd.DataFrame({"Feature": feature_names, 
                                     "Coefficient": model.coef_})
-            coef_df = coef_df.sort_values(by="Coefficient", ascending=True)
+            if "lasso" in name:
+                coef_df = coef_df.sort_values(by="Coefficient", ascending=True)
+            elif "ridge" in name:
+                coef_df = coef_df.reindex(coef_df["Coefficient"].abs().sort_values().index)
             plt.figure(figsize=(8,6))
             #creating horizontal bar charts
             plt.barh(coef_df["Feature"], coef_df["Coefficient"], color="green")
