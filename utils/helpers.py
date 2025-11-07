@@ -3,7 +3,9 @@ import numpy as np
 import os
 import joblib
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import seaborn as sns
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error, mean_absolute_percentage_error
+
 
 BASE_DIR = r"C:\Users\elakkiya\json_tutorial\Chennai_Weather_Prediction"
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -39,6 +41,7 @@ def evaluate_model(x_test, y_test, name=None):
         print("Calculating Metrics...")
         rmse = np.sqrt(mean_squared_error(y_test, pred))
         r2 = r2_score(y_test, pred)
+        print("Metrics Calculated...")
         print(f"Visualizing {name}...")
         visualize_model(name, y_test, pred)
         return rmse, r2
@@ -49,6 +52,7 @@ def evaluate_model(x_test, y_test, name=None):
         print("Calculating Metrics...")
         rmse = np.sqrt(mean_squared_error(y_test, pred))
         r2 = r2_score(y_test, pred)
+        print("Metrics Calculated...")
         print(f"Visualizing {name}...")
         #sending model to get the coefficients
         if hasattr(x_test, "columns"):
@@ -57,6 +61,18 @@ def evaluate_model(x_test, y_test, name=None):
         else:
             print("Visualization Not done: Check if feature names are passed with Lasso x_test data set")
         return rmse, r2
+
+    elif "forest" in name:
+        print(f"predicting with {name}...")
+        pred = model.predict(x_test)
+        print("Calculating Metrics...")
+        rmse = np.sqrt(mean_squared_error(y_test, pred))
+        r2 = r2_score(y_test, pred)
+        mape = mean_absolute_percentage_error(y_test, pred) * 100
+        print(f"Metrics Calculated...\nVisualizing {name}")
+        visualize_model(name, y_test, pred, model = model, x_test = x_test, rmse=rmse, r2=r2, mape=mape)
+        print("Visualization Done")
+        return rmse, r2, mape
     else:
         print("Evaluation is not defined for this model")
         return None
@@ -87,7 +103,7 @@ def set_up_viz(y_test, pred, color="red", title = "Actual vs Predicted", rmse=No
     plt.show()
 
 ##VISUALIZING THE TRAIN TEST SPLIT - TIME SERIES VIZ
-def visualize_model(name,y_test, pred, model=None, x_test=None, rmse=None, r2=None):
+def visualize_model(name,y_test, pred, model=None, x_test=None, rmse=None, r2=None, mape=None):
     #LINEAR REGRESSION
     if name=="linear_regression":
         try:
@@ -123,6 +139,53 @@ def visualize_model(name,y_test, pred, model=None, x_test=None, rmse=None, r2=No
             print(f"{name} - Visualization -2 done")
         except Exception as e:
             print(f"An error occured during visualization: {e}")
+            
+    #3. RANDOM FOREST REGRESSOR BASELINE
+    elif "forest" in name:
+        text = f"RMSE: {rmse:.2f}\nR-squared: {r2:.3f}\nMAPE: {mape:.2f}%"
+        residuals = y_test - pred#viz2 Residual Distribution Plot
+        feature_imp = model.feature_importances_#viz 3 Feature Importance barplot
+        feature_imp_df = pd.DataFrame({"Feature": x_test.columns,
+                                       "Importance": feature_imp}).sort_values(by="Importance",
+                                                                               ascending=True)
+        fig, axes = plt.subplots(4,1, figsize=(10,20))
+        axes = axes.flatten()
+        #1. Actual vs Predicted plot - y_test, pred
+        axes[0].scatter(y_test, pred, alpha=0.6, color="red")
+        axes[0].plot([y_test.min(), y_test.max()],
+                     [y_test.min(), y_test.max()],
+                     color="blue", linestyle="--", label="Fit Line")
+        axes[0].set_title("Actual vs Predicted", fontsize=14, weight="bold")
+        axes[0].set_xlabel("Actual", fontsize=12)
+        axes[0].set_ylabel("Predicted", fontsize=12)
+        #2. Residuals Distribution plot - residuals
+        sns.histplot(residuals, bins=30, kde=True, color="coral", ax=axes[1])
+        axes[1].axvline(0, color="black", linestyle="--", lw=2)
+        axes[1].set_title("Residuals Distribution", fontsize=14, weight="bold")
+        axes[1].set_xlabel("Residuals (Actual-Prediction)", fontsize=12)
+        axes[1].set_ylabel("Frequency", fontsize=12)
+        #3. Feature Importance plot - feature, importance score
+        sns.barplot(x="Importance", y="Feature", data=feature_imp_df,
+                    ax=axes[2], palette = "viridis")
+        axes[2].set_title("Feature Importance", fontsize=14, weight="bold")
+        axes[2].set_xlabel("Importance score", fontsize=12)
+        axes[2].set_ylabel("Features", fontsize=12)
+        #4. Residuals vs Predicted plot - residuals, pred
+        axes[3].scatter(pred, residuals, alpha=0.6, color="green")
+        axes[3].axhline(0, color="blue", linestyle="--", lw=2)
+        axes[3].set_title("Residuals vs Predicted values", fontsize=14, weight="bold")
+        axes[3].set_xlabel("Predicted Values", fontsize=12)
+        axes[3].set_ylabel("Residuals", fontsize=12)
+        axes[0].text(0.05, 0.95, text, transform=axes[0].transAxes,
+                     fontsize=10, color="black",
+                     verticalalignment="top",
+                     bbox = dict(boxstyle="round,pad=0.4",
+                                 facecolor = "lightgray",
+                                 alpha = 0.5))
+        plt.suptitle(f"{name} Model Diagnostics", fontsize=16, weight="bold")
+        plt.tight_layout(rect=[0,0,1,0.96])
+        plt.show()
+        
     else:
         print("visualization not designed for this model")
         
@@ -139,14 +202,21 @@ def forecast_next_3_days(model_name,data_df, n_days = 3):
     else:
         last_date = pd.Timestamp.today()
         print("Last Date: ", last_date)
-        
+
+    needs_scaling = any(text in model_name.lower() for text in ["linear",
+                                                                "lasso",
+                                                                "rigde"])
     for i in range(n_days):
         # 1. Getting the recent data with respect to date - the last row
         x_ip = data.tail(1).copy()
         x_ip = x_ip.drop(columns=["date"], errors = "ignore")
         #no scaling as already x_test is scaled
         # 3. Predicting the next day max temp - if oct 29 is the x_ip then this pred is for oct 30
-        next_pred = model.predict(x_ip)[0] #to get the only value in the array as float and not as an array
+        if needs_scaling and scaler is not None:
+            x_ip_scaled = scaler.transform(x_ip)
+            next_pred = model.predict(x_ip_scaled)[0]
+        else:
+            next_pred = model.predict(x_ip)[0] #to get the only value in the array as float and not as an array
         # 4. adding this prediction to the output list
         #predictions_list.append(next_pred)
         next_day = last_date + pd.Timedelta(days = i+1)
@@ -163,5 +233,5 @@ def forecast_next_3_days(model_name,data_df, n_days = 3):
         new_row["temp_max_lag_2"] = new_row["temp_max_lag_1"] 
         new_row["temp_max_lag_1"] = next_pred #setting the predicted value of oct 30 as temp_max_lag_1 feature 
         #now our new row for oct 31 is ready to predict oct 31
-        data = pd.concat([data, new_row], ignore_index=False)
+        data = pd.concat([data, new_row], ignore_index=True)
     return pd.DataFrame(predictions_list)
