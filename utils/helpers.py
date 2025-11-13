@@ -4,13 +4,14 @@ import os
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
+import shap #for XGBoost specifically
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error, mean_absolute_percentage_error
 
 
 BASE_DIR = r"C:\Users\elakkiya\json_tutorial\Chennai_Weather_Prediction"
 DATA_DIR = os.path.join(BASE_DIR, "data")
 MODELS_DIR = os.path.join(BASE_DIR, "models")
-RESULTS_DIR = os.path.join(BASE_DIR, "results")
+PLOTS_DIR = os.path.join(BASE_DIR, "reports","plots")
 
 #LOADING DATA
 def load_data():
@@ -30,165 +31,143 @@ def save_model(model, name):
 #LOAD THE MODEL
 def load_model(name):
     return joblib.load(os.path.join(MODELS_DIR, f"{name}.pkl"))
-    
-#EVALUATE THE MODEL WITH RMSE AND R2SCORE
-def evaluate_model(x_test, y_test, name=None):
-    print(f"{name} Model Evaluation starts...")
-    model  = load_model(name)
-    if name =="linear_regression":
-        print(f"predicting with {name}...")
-        pred = model.predict(x_test)
-        print("Calculating Metrics...")
-        rmse = np.sqrt(mean_squared_error(y_test, pred))
-        r2 = r2_score(y_test, pred)
-        print("Metrics Calculated...")
-        print(f"Visualizing {name}...")
-        visualize_model(name, y_test, pred)
-        return rmse, r2
-        
-    elif name in ["lasso_regression" ,"lassoCV", "ridge_regression", "ridgeCV"]:
-        print(f"predicting with {name}...")
-        pred = model.predict(x_test)
-        print("Calculating Metrics...")
-        rmse = np.sqrt(mean_squared_error(y_test, pred))
-        r2 = r2_score(y_test, pred)
-        print("Metrics Calculated...")
-        print(f"Visualizing {name}...")
-        #sending model to get the coefficients
-        if hasattr(x_test, "columns"):
-            visualize_model(name, y_test, pred, model = model, 
-                            x_test = x_test, rmse=rmse, r2=r2)
-        else:
-            print("Visualization Not done: Check if feature names are passed with Lasso x_test data set")
-        return rmse, r2
 
-    elif "forest" in name:
-        print(f"predicting with {name}...")
-        pred = model.predict(x_test)
-        print("Calculating Metrics...")
-        rmse = np.sqrt(mean_squared_error(y_test, pred))
-        r2 = r2_score(y_test, pred)
-        mape = mean_absolute_percentage_error(y_test, pred) * 100
-        print(f"Metrics Calculated...\nVisualizing {name}")
-        visualize_model(name, y_test, pred, model = model, x_test = x_test, rmse=rmse, r2=r2, mape=mape)
-        print("Visualization Done")
-        return rmse, r2, mape
-    else:
-        print("Evaluation is not defined for this model")
+#IN PRODUCTION READY DESIGN
+def evaluate_model(x_test, y_test, name=None, save_plots=False):
+    """
+    Evaluate and visualize model performance (supports Linear, Lasso, Ridge, RF, XGB).
+    Returns metrics as a dictionary for logging.
+    """
+    print(f"[INOF] Starting evaluation for model: {name}")
+    try:
+        model = load_model(name)
+    except Exception as e:
+        print(f"[ERROR] Failed to load model {name} : {e}")
         return None
-        
-
-def set_up_viz(y_test, pred, color="red", title = "Actual vs Predicted", rmse=None, r2=None):
-    plt.figure(figsize=(8,6))
-    plt.scatter(y_test, pred, alpha=0.6, color="red", label = "Predictions")
-    plt.plot([y_test.min(), y_test.max()],
-             [y_test.min(), y_test.max()], color = "blue", 
-             linestyle="--", label = "Fit Line")
-    plt.xlabel("Actual Temperature")
-    plt.ylabel("Predicted Temperature")
-    plt.title(title)
-
-    if rmse is not None and r2 is not None:
-        text = f"RMSE: {rmse:.2f}\nR-squared: {r2:.3f}"
-        plt.text(0.05, 0.95, text, 
-                 transform = plt.gca().transAxes,
-                 fontsize = 11, color="black",
-                 verticalalignment = "top",
-                 bbox = dict(boxstyle="round,pad=0.4", 
-                             facecolor="lightgray",
-                             alpha=0.5))
+    try:
+        pred = model.predict(x_test)
+    except Exception as e:
+        print(f"[ERROR] Prediction Failed for model {name} : {e}")
+        return None
+    #CALCULATING METRICS
+    try:
+        rmse = np.sqrt(mean_squared_error(y_test, pred))
+        r2 = r2_score(y_test, pred)
+        mape = mean_absolute_percentage_error(y_test, pred)*100
+        print(f"[SUCCESS] Metrics calculated for {name}")
+    except Exception as e:
+        print(f"[ERROR] Failed to calculate metrics for {name} : {e}")
+        return None
+    #VISUALIZATION
+    try:
+        visualize_model(name=name, y_test = y_test, pred= pred, model = model, x_test=x_test,
+                        rmse=rmse, r2=r2, mape=mape,
+                        save_plots = save_plots)
+        print(f"[SUCCESS] Visualization completed for {name}")
+    except Exception as e:
+        print(f"[WARNING] Visualization skipped due to error : {e}")
     
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    return {'model':name, 'rmse':rmse, "r2":r2, "mape":mape}
 
-##VISUALIZING THE TRAIN TEST SPLIT - TIME SERIES VIZ
-def visualize_model(name,y_test, pred, model=None, x_test=None, rmse=None, r2=None, mape=None):
-    #LINEAR REGRESSION
-    if name=="linear_regression":
+def visualize_model(name, y_test, pred, model=None, x_test= None,
+                    rmse=None, r2=None, mape=None, 
+                    save_plots=False):
+    """
+    Handles visualization for Linear, Lasso, Ridge, RandomForest, XGB models.
+    Produces and optionally saves all key diagnostic plots.
+    """
+    if name in ["linear_regression", "lasso_regression" ,"lassoCV", "ridge_regression", "ridgeCV"]:
         try:
-            set_up_viz(y_test, pred, title = f"{name}: Actual vs Predicted", 
-                       rmse=rmse, r2=r2)
-            print(f"{name} - Visualization done")
-        except Exception as e:
-            print(f"An error occured during visualization: {e}")
+            fig, ax = plt.subplots(figsize=(8,6))
+            ax.scatter(y_test, pred, alpha=0.6, color="red", label="Predictions")
+            ax.plot([y_test.min(), y_test.max()],
+                    [y_test.min(), y_test.max()],
+                    color='blue', linestyle='--', label="Fit Line")
+            ax.set_title(f"{name}: Actual vs Predicted", fontsize=14, weight="bold")
+            ax.set_xlabel("Actual Temperature", fontsize=12, weight="bold")
+            ax.set_ylabel("Predicted Temperature", fontsize=12, weight="bold")
             
-    #2. LASSO REGRESSION, RIDGE REGRESSION
-    elif name in ["lasso_regression", "lassoCV", "ridge_regression", "ridgeCV"]:
-        try:
-            #VIZ 1 on Actual vs Predicted
-            set_up_viz(y_test, pred, title = f"{name}: Actual vs Predicted",
-                      rmse=rmse, r2=r2)
-            print(f"{name} - Visualization - 1 done")
-            #VIZ 2 on Coefficients
-            feature_names = x_test.columns
-            coef_df = pd.DataFrame({"Feature": feature_names, 
-                                    "Coefficient": model.coef_})
-            if "lasso" in name:
-                coef_df = coef_df.sort_values(by="Coefficient", ascending=True)
-            elif "ridge" in name:
-                coef_df = coef_df.reindex(coef_df["Coefficient"].abs().sort_values().index)
-            plt.figure(figsize=(8,6))
-            #creating horizontal bar charts
-            plt.barh(coef_df["Feature"], coef_df["Coefficient"], color="green")
-            plt.xlabel("Coefficient Value")
-            plt.ylabel("Feature")
-            plt.title(f"{name} Coefficients")
+            if rmse is not None and r2 is not None:
+                text = f"RMSE: {rmse:.2f}\nR2: {r2:.3f}"
+                ax.text(0.05, 0.95, text, transform=ax.transAxes,
+                        fontsize=11, color="Black", verticalalignment="top",
+                        bbox=dict(boxstyle="round,pad=0.4", facecolor="lightgray", alpha=0.5))
             plt.tight_layout()
             plt.show()
-            print(f"{name} - Visualization -2 done")
+            plt.close(fig)
+            #coeefficient plot for linear_type models
+            if hasattr(model, "coef_") and hasattr(x_test, "columns"):
+                coef_df = pd.DataFrame({'Feature':x_test.columns, 
+                                        "Coefficient":model.coef_})
+                coef_df = coef_df.sort_values(by="Coefficient", ascending=True)
+                fig, ax= plt.subplots(figsize=(8,6))
+                sns.barplot(data = coef_df, x="Coefficient", y="Feature",
+                            ax=ax, palette = "viridis")
+                ax.set_title(f"{name}: Coefficeient Importance", fontsize=14, weight="bold")
+                plt.tight_layout()
+                plt.show()
+                plt.close(fig)
         except Exception as e:
-            print(f"An error occured during visualization: {e}")
+            print(f"[ERROR] Visualization failed for {name} linear model: {e}")
+    #TREE based models 
+    elif "forest" in name or "xgb" in name:
+        try:
+            residuals = y_test-pred
+            if not hasattr(model, "feature_importances_"):
+                print("[WARNING] Model has no feature_importances_ atrribute.Skipping feature importance plot")
+                feature_imp_df=None
+            else:
+                feature_imp_df = pd.DataFrame({"Feature":x_test.columns,
+                                               "Importance":model.feature_importances_})
+                feature_imp_df = feature_imp_df.sort_values(by="Importance",
+                                                            ascending=True)
+            fig, axes=plt.subplots(4,1, figsize=(10,20))
+            axes = axes.flatten()
             
-    #3. RANDOM FOREST REGRESSOR BASELINE
-    elif "forest" in name:
-        text = f"RMSE: {rmse:.2f}\nR-squared: {r2:.3f}\nMAPE: {mape:.2f}%"
-        residuals = y_test - pred#viz2 Residual Distribution Plot
-        feature_imp = model.feature_importances_#viz 3 Feature Importance barplot
-        feature_imp_df = pd.DataFrame({"Feature": x_test.columns,
-                                       "Importance": feature_imp}).sort_values(by="Importance",
-                                                                               ascending=True)
-        fig, axes = plt.subplots(4,1, figsize=(10,20))
-        axes = axes.flatten()
-        #1. Actual vs Predicted plot - y_test, pred
-        axes[0].scatter(y_test, pred, alpha=0.6, color="red")
-        axes[0].plot([y_test.min(), y_test.max()],
-                     [y_test.min(), y_test.max()],
-                     color="blue", linestyle="--", label="Fit Line")
-        axes[0].set_title("Actual vs Predicted", fontsize=14, weight="bold")
-        axes[0].set_xlabel("Actual", fontsize=12)
-        axes[0].set_ylabel("Predicted", fontsize=12)
-        #2. Residuals Distribution plot - residuals
-        sns.histplot(residuals, bins=30, kde=True, color="coral", ax=axes[1])
-        axes[1].axvline(0, color="black", linestyle="--", lw=2)
-        axes[1].set_title("Residuals Distribution", fontsize=14, weight="bold")
-        axes[1].set_xlabel("Residuals (Actual-Prediction)", fontsize=12)
-        axes[1].set_ylabel("Frequency", fontsize=12)
-        #3. Feature Importance plot - feature, importance score
-        sns.barplot(x="Importance", y="Feature", data=feature_imp_df,
-                    ax=axes[2], palette = "viridis")
-        axes[2].set_title("Feature Importance", fontsize=14, weight="bold")
-        axes[2].set_xlabel("Importance score", fontsize=12)
-        axes[2].set_ylabel("Features", fontsize=12)
-        #4. Residuals vs Predicted plot - residuals, pred
-        axes[3].scatter(pred, residuals, alpha=0.6, color="green")
-        axes[3].axhline(0, color="blue", linestyle="--", lw=2)
-        axes[3].set_title("Residuals vs Predicted values", fontsize=14, weight="bold")
-        axes[3].set_xlabel("Predicted Values", fontsize=12)
-        axes[3].set_ylabel("Residuals", fontsize=12)
-        axes[0].text(0.05, 0.95, text, transform=axes[0].transAxes,
-                     fontsize=10, color="black",
-                     verticalalignment="top",
-                     bbox = dict(boxstyle="round,pad=0.4",
-                                 facecolor = "lightgray",
-                                 alpha = 0.5))
-        plt.suptitle(f"{name} Model Diagnostics", fontsize=16, weight="bold")
-        plt.tight_layout(rect=[0,0,1,0.96])
-        plt.show()
-        
+            #1. Actual vs Predicted plot - y_test, pred
+            axes[0].scatter(y_test,pred, alpha=0.6, color="red")
+            axes[0].plot([y_test.min(), y_test.max()],
+                         [y_test.min(), y_test.max()],
+                         color="blue", linestyle='--')
+            axes[0].set_title(f"{name}: Actual vs Predicted", fontsize=14, weight="bold")
+            axes[0].set_xlabel("Actual", fontsize=12, weight="bold")
+            axes[0].set_ylabel("Predicted", fontsize=12, weight="bold")
+            axes[0].text(0.05, 0.95, f"RMSE:{rmse:.2f}, R2:{r2:.3f}, MAPE:{mape:.2f}%",
+                      transform=axes[0].transAxes, fontsize=10, bbox=dict(facecolor="lightgray", alpha=0.5))
+            
+                      
+            #2. Residuals Distribution plot - residuals
+            sns.histplot(residuals, bins=30, kde=True, color="coral", ax=axes[1])
+            axes[1].axvline(0, color="black", linestyle = '--', lw=2)
+            axes[1].set_title("Residuals Distribution", fontsize=14, weight="bold")
+    
+            #3. Feature Importance plot - feature, importance score
+            if feature_imp_df is not None:
+                sns.barplot(x="Importance", y="Feature", data=feature_imp_df,
+                            ax=axes[2], palette="viridis")
+                axes[2].set_title("Feature Importance", fontsize=14, weight="bold")
+            else:
+                axes[2].text(0.5, 0.5, "No feature Importance available", ha='center')  
+            
+            #4. Residuals vs Predicted plot - residuals, pred
+            axes[3].scatter(pred, residuals, alpha=0.6, color="green")
+            axes[3].axhline(0,color='blue', linestyle='--', lw=2)
+            axes[3].set_title("Residuals vs Predicted values", fontsize=14, weight="bold")
+            axes[3].set_xlabel("Predicted values", fontsize=12)
+            axes[3].set_ylabel("Residuals", fontsize=12)
+
+            plt.suptitle(f"{name} Model Diagnostics", fontsize=16, weight='bold')
+            plt.tight_layout(rect=[0,0,1,0.96])
+            plt.show()
+            plt.close(fig)
+
+        except Exception as e:
+            print(f"[ERROR] Visualization failed for tree-based models: {e}")
     else:
-        print("visualization not designed for this model")
+        print(f"[INFO] Visualization not implemented for model type: {name}")
         
+
+    
 #FORECASTING THE NEXT 3 DAYS TEMPERATURE
 def forecast_next_3_days(model_name,data_df, n_days = 3):
     predictions_list = []
